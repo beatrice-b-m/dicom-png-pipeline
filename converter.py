@@ -2,6 +2,7 @@ from image_enhancement import image_enhancement
 import cv2 as cv
 import numpy as np
 import pydicom
+from pydicom.pixel_data_handlers import apply_voi_lut
 
 def normalize_img(img, bits = 8, dtype = np.uint8, eps: float = 1e-9):
     """Normalize an image to a desired bit depth and dtype."""
@@ -48,7 +49,8 @@ def apply_agcwd(img):
 
 def convert_dicom(dcm, method):
     """Convert a DICOM image to a normalized, contrast-enhanced image."""
-    img = dcm.pixel_array
+    # extract pixel array and apply voi-lut transformation
+    img = apply_voi_lut(dcm.pixel_array, dcm)
 
     # invert img if necessary based on PhotometricInterpretation value
     if dcm['PhotometricInterpretation'].value == 'MONOCHROME1':
@@ -60,20 +62,19 @@ def convert_dicom(dcm, method):
     # normalize the image (preserving bit depth as long as possible)
     img = normalize_img(img, bits=16, dtype=np.uint16)
 
-    # apply contrast enhancement method
+    # apply post-processing method
     img = apply_method(img, method)
 
     return img
     
 
 class DataFrameConverter:
-    def __init__(self, df, method='clahe', output_paths=True, dcm_path_col='anon_dicom_path'):
+    def __init__(self, df, method='clahe', dcm_path_col='anon_dicom_path'):
         """
         Initialize a DataFrameConverter object with a DataFrame and contrast enhancement method.
         """
         self.df = df
         self.method = method
-        self.output_paths = output_paths
         self.dcm_path_col = dcm_path_col
 
     def __iter__(self):
@@ -84,17 +85,7 @@ class DataFrameConverter:
         for i, data in self.df.iterrows():
             with pydicom.dcmread(data[self.dcm_path_col]) as dcm:
                 img = convert_dicom(dcm, self.method)
-                yield img, data[self.dcm_path_col]
+                yield i, img
 
     def __len__(self):
         return len(self.df)
-    
-
-def convert_df(df, method = 'clahe', save=True):
-    """
-    Convert a DataFrame of DICOM images to a list of normalized, contrast-enhanced images.
-    """
-    converter = DataFrameConverter(df, method)
-
-    imgs = [img for img in converter]
-    return imgs
